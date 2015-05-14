@@ -5,7 +5,6 @@ arm_objcopy			= "arm-none-eabi-objcopy"
 stm32cubef4_drivers	= "C:/work/stm32/STM32Cube_FW_F4_V1.4.0/Drivers"
 stlink_cli			= "C:/Program Files (x86)/STMicroelectronics/STM32 ST-LINK Utility/ST-LINK Utility/ST-LINK_CLI.exe"
 build_folder		= "build_temp"
-# -c SWD -p main.bin -Rst -Run
 
 # flash configuration
 flash_base			= "0x08000000"
@@ -75,6 +74,9 @@ def temp_file(name, ext = None):
 def tool_file(name):
 	return os.path.normpath(os.path.abspath(os.path.join(os.path.dirname(__file__), name)))
 
+def shellquote(s):
+	return "\"" + s.replace("\"", "\\\"") + "\""
+
 def find_files(path, include_dirs, sources):
 	include_dirs.add(path)
 	import os
@@ -140,7 +142,7 @@ wr.rule("cc", "$bin_cc $cflags -o $out -c $in")
 wr.rule("ld", "$bin_cc $ldflags -o $out $in")
 wr.rule("as", "$bin_as $asflags -o $out -c $in")
 wr.rule("cp", "$bin_cp -O binary $in $out")
-wr.rule("sign", "python " + tool_file("tool_sign.py") + " $in $out $flash_signoffset")
+wr.rule("sign_and_deploy", "python " + tool_file("tool_sign_and_deploy.py") + " $in $out $flash_signoffset " + shellquote(stlink_cli) + " $flash_base $flash_offset")
 
 wr.comment("build")
 
@@ -167,7 +169,5 @@ main_bin		= temp_file("main.bin")
 
 wr.build(main_elf, "ld", list(o_files), implicit = [linker_script])
 wr.build(main_bin_ns, "cp", main_elf)
-wr.build(main_bin, "sign", main_bin_ns)
-
-wr.comment("deploy")
+wr.build(main_bin, "sign_and_deploy", main_bin_ns)
 
