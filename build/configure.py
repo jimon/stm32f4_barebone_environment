@@ -47,8 +47,11 @@ features = {
 }
 
 # helper functions to get list of files
+import os
+
 def excluded(path):
 	for name, val in features.items():
+		name = os.path.normpath(name)
 		if name in path and not val:
 			return True
 	return False
@@ -60,7 +63,9 @@ def any(files, with_ext):
 	return False
 
 def anyitem(iterable):
-	return iter(iterable).next()
+	for i in iterable:
+		return i
+	return None
 
 def now_known(ext):
 	return ext not in [".h", ".c", ".cxx", ".cpp", ".in", ".s"]
@@ -78,8 +83,7 @@ def shellquote(s):
 	return "\"" + s.replace("\"", "\\\"") + "\""
 
 def find_files(path, include_dirs, sources):
-	include_dirs.add(path)
-	import os
+	include_dirs.add(os.path.normpath(os.path.abspath(path)))
 	for root, dir, files in os.walk(path):
 		if excluded(root):
 			continue
@@ -104,7 +108,6 @@ if ".in" not in sources:
 	print("unable to find linker script template (_name_.ld.in), do not know how to link")
 	exit(1)
 
-import os
 linker_script_in = anyitem(sources[".in"])
 linker_script = temp_file(os.path.basename(os.path.splitext(linker_script_in)[0]))
 
