@@ -4,6 +4,7 @@ arm_as				= "arm-none-eabi-as"
 arm_objcopy			= "arm-none-eabi-objcopy"
 stm32cubef4_drivers	= "C:/work/stm32/STM32Cube_FW_F4_V1.4.0/Drivers"
 stlink_cli			= "C:/Program Files (x86)/STMicroelectronics/STM32 ST-LINK Utility/ST-LINK Utility/ST-LINK_CLI.exe"
+build_folder		= "build_temp"
 # -c SWD -p main.bin -Rst -Run
 
 # flash configuration
@@ -46,9 +47,10 @@ features = {
 	"CMSIS/Lib":							False,
 }
 
+# helper functions to get list of files
 def excluded(path):
 	for name, val in features.items():
-		if name in root and not val:
+		if name in path and not val:
 			return True
 	return False
 
@@ -58,42 +60,57 @@ def any(files, with_ext):
 			return True
 	return False
 
-import os, glob
-from pprint import pprint
+def anyitem(iterable):
+	return iter(iterable).next()
 
-include_dirs = ["."]
+def now_known(ext):
+	return ext not in [".h", ".c", ".cxx", ".cpp", ".in", ".s"]
+
+def temp_file(name, ext = None):
+	if ext is None:
+		return os.path.normpath(os.path.abspath(os.path.join(build_folder, os.path.basename(name))))
+	else:
+		return os.path.normpath(os.path.abspath(os.path.join(build_folder, os.path.splitext(os.path.basename(name))[0] + ext)))
+
+def tool_file(name):
+	return os.path.normpath(os.path.abspath(os.path.join(os.path.dirname(__file__), name)))
+
+def find_files(path, include_dirs, sources):
+	include_dirs.add(path)
+	import os
+	for root, dir, files in os.walk(path):
+		if excluded(root):
+			continue
+		if any(files, ".h") or any(files, ".hpp"):
+			include_dirs.add(os.path.normpath(os.path.abspath(root)))
+		for file in files:
+			filename_abs = os.path.normpath(os.path.abspath(os.path.join(root, file)))
+			ext = os.path.splitext(filename_abs)[1]
+			if excluded(filename_abs) or now_known(ext):
+				continue
+			if ext not in sources:
+				sources[ext] = set()
+			sources[ext].add(filename_abs)
+
+# figure out list of required files
+include_dirs = set()
 sources = {}
+find_files(stm32cubef4_drivers, include_dirs, sources)
+find_files(".", include_dirs, sources)
 
-#for root, dir, files in os.walk("Drivers"):
-#	enabled = True
-#	for name, val in features.items():
-#		if name in root and not val:
-#			enabled = False
-#			break
-#
-#	if not enabled:
-#		continue
-#
-#
-#	if any(files, ".h"):
-#		include_dirs.append(root)
-#
-#	for file in files:
-#		enabled = True
-#		for name, val in features.items():
-#			if name in file and not val:
-#				enabled = False
-#				break
-#		if not enabled:
-#			continue
-#		if file.endswith(".c"):
-#			sources_c.append(root + "/" + file)
-#		if file.endswith(".cpp") or file.endswith(".cxx"):
-#			sources_cpp.append(root + "/" + file)
+if ".in" not in sources:
+	print("unable to find linker script template (_name_.ld.in), do not know how to link")
+	exit(1)
 
+import os
+linker_script_in = anyitem(sources[".in"])
+linker_script = temp_file(os.path.basename(os.path.splitext(linker_script_in)[0]))
+
+# generate build.ninja file
+if not os.path.isdir(build_folder):
+	os.mkdir(build_folder)
 import ninja_syntax
-
-wr = ninja_syntax.Writer(open("build.ninja", "w"))
+wr = ninja_syntax.Writer(open(temp_file("build.ninja"), "w"))
 wr.comment("general settings")
 wr.variable("flash_base", flash_base)
 wr.variable("flash_offset", flash_offset)
@@ -107,7 +124,7 @@ wr.variable("bin_as", arm_as)
 wr.variable("bin_cp", arm_objcopy)
 wr.variable("bin_stlink", stlink_cli)
 wr.variable("include_paths", "".join(["-I" + f + " " for f in include_dirs]))
-wr.variable("linkerscript", "STM32F407VG_FLASH.ld")
+wr.variable("linkerscript", linker_script)
 
 wr.comment("compiler flags")
 wr.variable("cpuflags", "-mcpu=cortex-m4 -mthumb -mlittle-endian -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb-interwork")
@@ -118,26 +135,39 @@ wr.variable("ldflags", "$cpuflags $debugflags -O3 -T$linkerscript -Wl,--gc-secti
 wr.variable("asflags", "$cpuflags $debugflags")
 
 wr.comment("rules")
-wr.rule("ldscript", "python tool_strrepl.py $in $out FLASH_BASE $flash_base FLASH_OFFSET $flash_offset FLASH_SIGNOFFSET $flash_signoffset")
+wr.rule("ldscript", "python " + tool_file("tool_strrepl.py") + " $in $out FLASH_BASE $flash_base FLASH_OFFSET $flash_offset FLASH_SIGNOFFSET $flash_signoffset")
 wr.rule("cc", "$bin_cc $cflags -o $out -c $in")
 wr.rule("ld", "$bin_cc $ldflags -o $out $in")
 wr.rule("as", "$bin_as $asflags -o $out -c $in")
 wr.rule("cp", "$bin_cp -O binary $in $out")
-wr.rule("sign", "python tool_sign.py $in $out $flash_signoffset")
+wr.rule("sign", "python " + tool_file("tool_sign.py") + " $in $out $flash_signoffset")
 
 wr.comment("build")
 
+wr.build(linker_script, "ldscript", linker_script_in)
+
+o_files = set()
+for ext in [".c", ".cpp", ".cxx"]:
+	if ext in sources:
+		for file in sources[ext]:
+			temp = temp_file(file, ".o")
+			o_files.add(temp)
+			wr.build(temp, "cc", file)
+
+for ext in [".s"]:
+	if ext in sources:
+		for file in sources[ext]:
+			temp = temp_file(file, ".o")
+			o_files.add(temp)
+			wr.build(temp, "as", file)
+
+main_elf		= temp_file("main.elf")
+main_bin_ns		= temp_file("main.bin_ns")
+main_bin		= temp_file("main.bin")
+
+wr.build(main_elf, "ld", list(o_files), implicit = [linker_script])
+wr.build(main_bin_ns, "cp", main_elf)
+wr.build(main_bin, "sign", main_bin_ns)
+
 wr.comment("deploy")
-#sources_c.extend(["main.c", "stm32f4xx_it.c", "system_stm32f4xx.c", "periph/clock.c"])
-#objs = []
-#for s in sources_c:
-#	obj = os.path.basename(s) + ".o"
-#	objs.append(obj)
-#	wr.build(obj, "c", s)
 
-#wr.build("startup_stm32f407xx.o", "a", "startup_stm32f407xx.s")
-#objs.append("startup_stm32f407xx.s")
-
-#wr.build("main.elf", "l", objs)
-#wr.build("main.binns", "copy", "main.elf")
-#wr.build("main.bin", "sign", "main.binns")
