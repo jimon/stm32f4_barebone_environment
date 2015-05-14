@@ -6,6 +6,8 @@ Ultra simple build environment for stm32f4 based projects
 
 If you come from PC software development - stm32 build environments will look bulky, clumsy and awkward to you (for example arm keil). On other hand makefiles are so 90-x. So this small project tries to create the simplest possible environment based on more modern trends of building software.
 
+This env is based on [https://github.com/carrotIndustries/stm32-template ](https://github.com/carrotIndustries/stm32-template ) but it doesn't require epm or openocd to build project.
+
 ### Prerequirements
 
 - gcc arm embedded (download and unpack somewhere, will be easier if you add it to PATH)
@@ -22,4 +24,5 @@ If you come from PC software development - stm32 build environments will look bu
 
 ### How it works
 
-First we run configure script, it will walk through stm32cubef4 drivers and compile list of sources to build. Then it will generate ninja build file for us. [Ninja](https://martine.github.io/ninja/) is ultra simple and ultra fast build system with human readable make files. Then we run ninja and it will compile .bin file and run st-link to deploy it.  
+First we run configure script, it will walk through stm32cubef4 drivers and compile list of sources to build. Then it will generate ninja build file for us. [Ninja](https://martine.github.io/ninja/) is ultra simple and ultra fast build system with human readable make files. Then we run ninja and it will compile .bin file and run st-link to deploy it.
+   
